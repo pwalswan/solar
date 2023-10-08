@@ -1,0 +1,34 @@
+incomplete
+
+Using Visual Studio Code for development
+Created folder called solar and added a data directory with exercise data files
+Download Docker Desktop for Mac Intel, choose default complete installation (added Docker to path for terminal commands)
+Installed VSCode Python extension
+My python3 --version is 3.8.5
+Create virtual environment name venv 
+python3.8 -m venv venv
+source venv/bin/activate 
+
+That created a venv in the project root with bin, lib and include
+
+Installed VSCode Docker extension and let it generate default Python Dockerfile
+My app entrypoint is solar.py (print("Executing"))
+
+docker build -t solar-image .
+docker run --name solar-irradiance solar-image (it runs and exits)
+
+... and how you approached the problem
+1. Found definitions for the technical terms
+
+I have the photon counts. Need to put that into an equation. I need to calculate the irradiance in Watts/m2/nm for UpScan and DownScan and compare results.
+I also later need to add the temperature correction using data in detectorTemp.txt
+I also later need to adjust for the grating offset using the data in referenceSpectrum.txt
+I need to plot the data for the a and b cases.
+I need a summary.
+
+I need to load data. I'm using pandas instead of plain python since pandas has dataframe features and can later be plotted.
+pip3 install pandas
+This adds pandas, etc. to site-packages
+
+Starting with plans since it includes the start and end times for the UpScan and DownScan periods
+The integrationTime file appears to be the measurement period. It starts off at once per second and varies thereafter.
