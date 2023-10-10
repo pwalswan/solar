@@ -35,15 +35,15 @@ def getDarkCorrection(planName, planStartTime, planEndTime):
         dark_count_rate_corr = dark_count_rate * (1.0 + tempCorrFactor * (20.0 - detectorTemp))
 
         darkCountRates.append(dark_count_rate_corr)
+
         i += 1
         
         if i == 10:
-            break
+            break # Just need a few dark samples to get a typical baseline value
 
     median_dark_count_rate = np.median(darkCountRates)
 
     return median_dark_count_rate
-
 
 def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg):
     print('processPlan ' + planName + ' ...')
@@ -55,6 +55,8 @@ def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg
     # instrumentTelementry line 29159
     # At the Downscan end time, the grating position goes back to zero
     # instrumentTelementry line 31696 (no 31687)
+    # The difference between the indexes in the DownScan period is 31969 - 29159 = 2528
+    # The number of rows in the results.txt for DownScan is a match: 2528
 
     # UpScan starts on
     # instrumentTelemetry line 38938
@@ -93,8 +95,6 @@ def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg
     except:
         endIndex = instrumentTelemetry.index[-1] # Get the last index if the planEndTime exceeds the last intrumentTelemetry reading
 
-    # i = 1
-
     for telemetryRowIndex in range(startIndex, endIndex):
         instrumentTelementryRow = instrumentTelemetry.iloc[telemetryRowIndex]
         gratingPosition = instrumentTelementryRow['gratPos']
@@ -119,12 +119,7 @@ def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg
         # Photon Count Rate (counts/s/m2/nm)
         tempCorrFactor = 0.0061628 # [counts/degC]
         count_rate_corr = count_rate * (1.0 + tempCorrFactor * (20.0 - detectorTemp))
-        # dark_counts = 504.61167548376125
-        # dark_integrationTime = 9.434192873600002E14 # convert to seconds
-        # dark_count_rate = dark_counts / dark_integrationTime
-        # dark_count_rate_corr = dark_count_rate * (1.0 + tempCorrFactor * (20.0 - detectorTemp))
-        # Seems dark_count_rate_corr should be a collection?
-        # median_dark_count_rate = median(dark_count_rate_corr)
+
         median_dark_count_rate = median_dark_count_rate_arg
         apertureArea = .01 / (1E2 * 1E2) # [m^2] (aperature area from cm^2 to m^2)
         photonsPerSecondPerM2 = (count_rate_corr - median_dark_count_rate) / apertureArea # [photons/sec/m^2/nm]
@@ -135,45 +130,26 @@ def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg
         energyPerPhoton = h * c / wavelengthInMeters # [J]
         wattsPerM2 = photonsPerSecondPerM2 * energyPerPhoton # [watts/m^2/nm]
 
-        # Look up wavelength by irradiance
-        # My exact wattsPerM2 don't match to the 19 decimals, so try to get a match using 6.
-        truncatedWattsPerM2 = int(wattsPerM2 * 10**6) / 10**6 # Truncate to six decimals
-        truncatedWattsPerM2_str = '{:.6f}'.format(truncatedWattsPerM2) # convert to strings for trunc comparison (not a round)
-        referenceSpectrum['irradiance_str'] = referenceSpectrum['irradiance (watts/m^2/nm)'].apply(lambda x: '{:.6f}'.format(x)) # trunc 6
-        try: 
-            referenceIndex = referenceSpectrum[referenceSpectrum['irradiance_str'] == truncatedWattsPerM2_str].index[0] # create string copy of irradiance
-        except:
-            # print('No matching irradiance in referenceSpectrum.')
-            continue
+        referenceSpectrum['irradiance (watts/m^2/nm)'] = pd.to_numeric(referenceSpectrum['irradiance (watts/m^2/nm)'])
+        closestIndex = (referenceSpectrum['irradiance (watts/m^2/nm)'] - wattsPerM2).abs().idxmin()
 
-        # We have the index, there may be more than one, or they may not be a match due to truncation
-        referenceSpectrumRow = referenceSpectrum.iloc[referenceIndex]
+        referenceSpectrumRow = referenceSpectrum.iloc[closestIndex]
         referenceSpectrumWavelength = referenceSpectrumRow['wavelength(nm)']
-        
-        # Lookup irradiance by wavelength
-        # roundedWavelength = round(wavelength, 2)
-        # referenceIndex = referenceSpectrum[referenceSpectrum['wavelength(nm)'] == roundedWavelength].index[0]
-        # referenceSpectrumRow = referenceSpectrum.iloc[referenceIndex]
-        # wattsPerM2 = referenceSpectrumRow['irradiance (watts/m^2/nm)']
         
         resultsList.append([
             planName,
             telemetryRowIndex, 
             instrumentTelementryRow['microsecondsSinceGpsEpoch'],
             wattsPerM2,
-            # wavelength
             referenceSpectrumWavelength
             ]
         )
 
-        # i += 1
-
-        # if i == 30:
-        #     break 
+    resultsList = sorted(resultsList, key=lambda x: x[4]) # sort by wavelength
 
     return resultsList
 
-def plotResults():
+def plotResults(planName):
     
     print('plotResults ...')
     
@@ -196,10 +172,8 @@ def plotResults():
     plt.ylabel('Irradiance (WattsPerM2)')
     plt.title('WattsPerM2 as a Function of Wavelength')
     plt.grid(True)
-    # plt.savefig('irradiance_plot.png')
-    plt.show()
-
-    # file.close()
+    plt.savefig('irradiance_plot_' + planName + '.png')
+    # plt.show()
 
 #Start
 print("Executing ...")
@@ -231,16 +205,13 @@ for index, row in plans.iterrows():
     if row['planName'] == 'Dark':
         median_dark_count_rate = getDarkCorrection(row['planName'], row['startTime'], row['endTime'])
 
-with open('results.txt', 'w') as resultsFile:
-    resultsFile.write(', '.join(headers) + '\n')
+for index, row in plans.iterrows():
 
-    for index, row in plans.iterrows():
+    if row['planName'] == 'Dark':
+        continue
 
-        if row['planName'] == 'Dark':
-            continue
-
-        if row['planName'] == 'UpScan': # Format one plan plot nicely before adding UpScan
-            continue
+    with open('results' + row['planName'] + '.txt', 'w') as resultsFile:
+        resultsFile.write(', '.join(headers) + '\n')
 
         returnedList = processPlan(row['planName'], row['startTime'], row['endTime'], median_dark_count_rate)
 
@@ -248,7 +219,6 @@ with open('results.txt', 'w') as resultsFile:
             formatted_row = ', '.join(map(str, result_row))
             resultsFile.write(formatted_row + '\n')
 
-
 print('Complete  ...')
 
-plotResults()
+plotResults('planName')
