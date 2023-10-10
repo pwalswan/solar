@@ -2,26 +2,86 @@ from datetime import datetime, timedelta
 from math import sin, cos
 import pandas as pd
 import matplotlib.pyplot as plt
+import numpy as np
 
-def processPlan(planName, planStartTime, planEndTime):
+def getDarkCorrection(planName, planStartTime, planEndTime):
+    print('getDarkCorrection ...')
+
+    instrumentTelemetry = pd.read_csv('./data/instrumentTelemetry.txt', skipinitialspace=True)
+    detectorTemps = pd.read_csv('./data/detectorTemp.txt', skipinitialspace=True)
+
+    startIndex = instrumentTelemetry[instrumentTelemetry['microsecondsSinceGpsEpoch'] == planStartTime].index[0]
+    endIndex = instrumentTelemetry[instrumentTelemetry['microsecondsSinceGpsEpoch'] == planEndTime].index[0]
+    
+    tempCorrFactor = 0.0061628 # [counts/degC]
+
+    darkCountRates = []
+
+    i = 0
+    
+    for telemetryRowIndex in range(startIndex, endIndex):
+        instrumentTelementryRow = instrumentTelemetry.iloc[telemetryRowIndex]
+
+        # Get the detectorTemp. All the data provided is time-tagged. Using the telemetry index for the detectorTemps file
+        detectorTempsRow = detectorTemps.iloc[telemetryRowIndex]
+        detectorTemp = detectorTempsRow['temp (C)']
+
+        dcr = instrumentTelementryRow['counts']
+        # Convert to seconds
+        dark_integration_time = instrumentTelemetry['microsecondsSinceGpsEpoch'] / 1_000_000
+
+        # Write dark_count_rate
+        dark_count_rate = dcr / dark_integration_time
+        dark_count_rate_corr = dark_count_rate * (1.0 + tempCorrFactor * (20.0 - detectorTemp))
+
+        darkCountRates.append(dark_count_rate_corr)
+        i += 1
+        
+        if i == 10:
+            break
+
+    median_dark_count_rate = np.median(darkCountRates)
+
+    return median_dark_count_rate
+
+
+def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg):
     print('processPlan ' + planName + ' ...')
+    
     # start 2009-11-28 03:17:30.850
     # end   2009-11-28 07:45:27.870
 
     # At the Downscan start time, the grating position in instrumentTelemetry goes from 0 to non-zero: 107189.77591053583
     # instrumentTelementry line 29159
     # At the Downscan end time, the grating position goes back to zero
-    # instrumentTelementry line 31696
+    # instrumentTelementry line 31696 (no 31687)
 
     # UpScan starts on
     # instrumentTelemetry line 38938
     # UpScan end on 
     # instrumentTelementry eof
+    # integrationTime.txt line 23515 and currently set integration time changes from 1000 to 1750
+    # There are exact matches for the times when the plans start, and the integration times change.
+
+    # integrationTime interval changes from 1000 to 1750 at the start of the Downscan 
+    # The time value is 9.43413450850000 at row 11841
+    # Notice on the rows before 11841, the interval is set to 1000, and each time is different
+    # by only one number, seconds. You can see the only difference is counding by tens.
+    # The currently set integration time changes here.
+    # So at this point and after, until it changes, the counts are not necessarily per second,
+    # but per integration time.
+    # So you need to convert the counts by the currently set integration time
+    # The next change in integrationTime is, at the end of Downscan
+    # 16263 9.434178728500002E14, 1750.0
+    # There is an exact match for the timestamps when a new integration time starts in both integrationTime
+    # and instrumentTelemetry.
+    # Notice the counts units in intrumentTelemetry.txt are not counts/s
 
     # Loop through instrumentTelemetry since it has the first factor we need
     instrumentTelemetry = pd.read_csv('./data/instrumentTelemetry.txt', skipinitialspace=True)
     detectorTemps = pd.read_csv('./data/detectorTemp.txt', skipinitialspace=True)
     referenceSpectrum = pd.read_csv('./data/referenceSpectrum.txt', skipinitialspace=True)
+    integrationTime = pd.read_csv('./data/integrationTime.txt', skipinitialspace=True)
 
     # New list and dataframe for results
     resultsList = []
@@ -33,11 +93,12 @@ def processPlan(planName, planStartTime, planEndTime):
     except:
         endIndex = instrumentTelemetry.index[-1] # Get the last index if the planEndTime exceeds the last intrumentTelemetry reading
 
-    i = 1
+    # i = 1
 
     for telemetryRowIndex in range(startIndex, endIndex):
         instrumentTelementryRow = instrumentTelemetry.iloc[telemetryRowIndex]
         gratingPosition = instrumentTelementryRow['gratPos']
+        microsecondsSinceGpsEpoch = instrumentTelementryRow['microsecondsSinceGpsEpoch']
 
         # Wavelength (the grating equation)
         offset = 239532.38
@@ -45,9 +106,11 @@ def processPlan(planName, planStartTime, planEndTime):
         d = 277.77777777777777 # [nm]
         phiGInRads = 0.08503244115716374 # [rad]
         ang1 = (offset - gratingPosition) * stepSize # [rad]
-        wavelength = 2 * d * sin(ang1) * cos(phiGInRads / 2.0) # [nm]
+        wavelength = 2 * d * sin(ang1) * cos(phiGInRads / 2.0) # [nm]  ~178nm
 
         count_rate = instrumentTelementryRow['counts']
+
+        count_rate = count_rate * 1000/1750
 
         # Get the detectorTemp. All the data provided is time-tagged. Using the telemetry index for the detectorTemps file
         detectorTempsRow = detectorTemps.iloc[telemetryRowIndex]
@@ -56,16 +119,13 @@ def processPlan(planName, planStartTime, planEndTime):
         # Photon Count Rate (counts/s/m2/nm)
         tempCorrFactor = 0.0061628 # [counts/degC]
         count_rate_corr = count_rate * (1.0 + tempCorrFactor * (20.0 - detectorTemp))
-        # This is looping through an UpScan or a DownScan, so don't expect to see a Dark count here
-        # Using the first intrumentTelemetry count for Dark plan in plans.txt.
-        # Hard coding until resolved
-        dark_counts = 504.61167548376125
-        dark_integrationTime = 9.434192873600002E14
-        dark_count_rate = dark_counts / dark_integrationTime
-        dark_count_rate_corr = dark_count_rate * (1.0 + tempCorrFactor * (20.0 - detectorTemp))
+        # dark_counts = 504.61167548376125
+        # dark_integrationTime = 9.434192873600002E14 # convert to seconds
+        # dark_count_rate = dark_counts / dark_integrationTime
+        # dark_count_rate_corr = dark_count_rate * (1.0 + tempCorrFactor * (20.0 - detectorTemp))
         # Seems dark_count_rate_corr should be a collection?
         # median_dark_count_rate = median(dark_count_rate_corr)
-        median_dark_count_rate = dark_count_rate_corr # Just set it to the dark_count_rate_corr
+        median_dark_count_rate = median_dark_count_rate_arg
         apertureArea = .01 / (1E2 * 1E2) # [m^2] (aperature area from cm^2 to m^2)
         photonsPerSecondPerM2 = (count_rate_corr - median_dark_count_rate) / apertureArea # [photons/sec/m^2/nm]
 
@@ -83,26 +143,33 @@ def processPlan(planName, planStartTime, planEndTime):
         try: 
             referenceIndex = referenceSpectrum[referenceSpectrum['irradiance_str'] == truncatedWattsPerM2_str].index[0] # create string copy of irradiance
         except:
-            # print('No matching irradiance in referenceSpectrum. Likely due to the dark counts not being included.')
+            # print('No matching irradiance in referenceSpectrum.')
             continue
 
         # We have the index, there may be more than one, or they may not be a match due to truncation
         referenceSpectrumRow = referenceSpectrum.iloc[referenceIndex]
         referenceSpectrumWavelength = referenceSpectrumRow['wavelength(nm)']
         
+        # Lookup irradiance by wavelength
+        # roundedWavelength = round(wavelength, 2)
+        # referenceIndex = referenceSpectrum[referenceSpectrum['wavelength(nm)'] == roundedWavelength].index[0]
+        # referenceSpectrumRow = referenceSpectrum.iloc[referenceIndex]
+        # wattsPerM2 = referenceSpectrumRow['irradiance (watts/m^2/nm)']
+        
         resultsList.append([
             planName,
             telemetryRowIndex, 
             instrumentTelementryRow['microsecondsSinceGpsEpoch'],
             wattsPerM2,
+            # wavelength
             referenceSpectrumWavelength
             ]
         )
 
-        i += 1
+        # i += 1
 
-        if i == 30:
-            break 
+        # if i == 30:
+        #     break 
 
     return resultsList
 
@@ -125,10 +192,11 @@ def plotResults():
 
     plt.figure(figsize=(12, 8))
     plt.plot(wavelengths, wattsPerM2s, marker='o', color='b', linestyle='-', linewidth=2, markersize=8)
-    plt.xlabel('Wavelength')
-    plt.ylabel('WattsPerM2')
-    plt.title('WattsPerM2 as a Function of Wavelength (Dark counts not calibrated)')
+    plt.xlabel('Wavelength (nm)')
+    plt.ylabel('Irradiance (WattsPerM2)')
+    plt.title('WattsPerM2 as a Function of Wavelength')
     plt.grid(True)
+    # plt.savefig('irradiance_plot.png')
     plt.show()
 
     # file.close()
@@ -138,6 +206,7 @@ print("Executing ...")
 
 plans = pd.read_csv('./data/plans.txt', skipinitialspace=True)
 
+# Add additional datetime formats to plans
 plans['startTimeSeconds'] = plans['startTime'].apply(lambda startTime: startTime / 1000000)
 plans['endTimeSeconds'] = plans['endTime'].apply(lambda endTime: endTime / 1000000)
 plans['startDateTime'] = plans['startTime'].apply(lambda startTime: datetime(1980, 1, 6, 0, 0, 0, 0) + timedelta(microseconds=startTime))
@@ -151,6 +220,17 @@ headers = [
     'wavelength'
 ]
 
+median_dark_count_rate = 0
+
+# Get the dark count correction
+for index, row in plans.iterrows():
+
+    if row['planName'] == 'UpScan' or row['planName'] == 'DownScan':
+        continue
+
+    if row['planName'] == 'Dark':
+        median_dark_count_rate = getDarkCorrection(row['planName'], row['startTime'], row['endTime'])
+
 with open('results.txt', 'w') as resultsFile:
     resultsFile.write(', '.join(headers) + '\n')
 
@@ -162,7 +242,7 @@ with open('results.txt', 'w') as resultsFile:
         if row['planName'] == 'UpScan': # Format one plan plot nicely before adding UpScan
             continue
 
-        returnedList = processPlan(row['planName'], row['startTime'], row['endTime'])
+        returnedList = processPlan(row['planName'], row['startTime'], row['endTime'], median_dark_count_rate)
 
         for result_row in returnedList:
             formatted_row = ', '.join(map(str, result_row))

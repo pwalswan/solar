@@ -15,10 +15,7 @@ Installed VSCode Docker extension and let it generate default Python Dockerfile
 My app entrypoint is solar.py (print("Executing"))
 
 docker build -t solar-image .
-docker run --name solar-irradiance solar-image (it runs and exits)
-
-... and how you approached the problem
-1. Found definitions for the technical terms
+docker run solar-image (it runs and exits)
 
 I have the photon counts. Need to put that into an equation. I need to calculate the irradiance in Watts/m2/nm for UpScan and DownScan and compare results.
 I also later need to add the temperature correction using data in detectorTemp.txt
@@ -32,3 +29,11 @@ This adds pandas, etc. to site-packages
 
 Starting with plans since it includes the start and end times for the UpScan and DownScan periods
 The integrationTime file appears to be the measurement period. It starts off at once per second and varies thereafter.
+
+The Watts per wavelength comes from the number of counts at the grating position in insturmentTelemetry.txt. 
+The grating position defines the wavelength, which is the first calculation.
+
+The m^2 comes from the aperture area.
+
+There is a sampling rate, cadence, frequency in integrationTime.txt. If the rate is 1000, keep the irradiance value.
+Otherwise, detect a change by iterating through integrationTime and set the new integration time.
