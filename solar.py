@@ -17,7 +17,7 @@ def getDarkCorrection(planName, planStartTime, planEndTime):
 
     darkCountRates = []
 
-    i = 0
+    i = 0 # i is the sample size counter for dark rate
     
     for telemetryRowIndex in range(startIndex, endIndex):
         instrumentTelementryRow = instrumentTelemetry.iloc[telemetryRowIndex]
@@ -78,6 +78,8 @@ def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg
     # There is an exact match for the timestamps when a new integration time starts in both integrationTime
     # and instrumentTelemetry.
     # Notice the counts units in intrumentTelemetry.txt are not counts/s
+    # The DownScan and UpScan plots overall seem the same (similar). If reduced to 30 rows, the plotting
+    # appearance shows, they are plotting the different result text files.
 
     # Loop through instrumentTelemetry since it has the first factor we need
     instrumentTelemetry = pd.read_csv('./data/instrumentTelemetry.txt', skipinitialspace=True)
@@ -110,7 +112,8 @@ def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg
 
         count_rate = instrumentTelementryRow['counts']
 
-        count_rate = count_rate * 1000/1750
+        intTime = 1750  # should be derived from integrationTime.txt intTime (milli-seconds)
+        count_rate = count_rate * 1000/intTime # should be derived from integrationTime
 
         # Get the detectorTemp. All the data provided is time-tagged. Using the telemetry index for the detectorTemps file
         detectorTempsRow = detectorTemps.iloc[telemetryRowIndex]
@@ -149,33 +152,42 @@ def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg
 
     return resultsList
 
-def plotResults(planName):
+def plotIrradianceResult(planName):
     
-    print('plotResults ...')
+    print('plotIrradianceResults ...')
     
     planNames = []
     wavelengths = []
     wattsPerM2s = []
+    irradianceRatios = []
 
-    with open('results.txt') as file:
+    with open('results' + planName + '.txt') as file:
 
         next(file) # skip headers
 
         for result in file:
             planName, telemetryRowIndex, microsecondsSinceGpsEpoch, wattsPerM2, wavelength = result.split(', ')
-            wavelengths.append(float(wavelength))
-            wattsPerM2s.append(float(wattsPerM2.strip('\n')))
+            if float(wavelength.rstrip('\n')) > 180 and float(wavelength.rstrip('\n')) < 183:
+                wavelengths.append(float(wavelength))
+                wattsPerM2s.append(float(wattsPerM2.strip('\n')))
+                irradianceRatios.append(float(wattsPerM2.strip('\n')) / float(wavelength))
 
     plt.figure(figsize=(12, 8))
     plt.plot(wavelengths, wattsPerM2s, marker='o', color='b', linestyle='-', linewidth=2, markersize=8)
     plt.xlabel('Wavelength (nm)')
     plt.ylabel('Irradiance (WattsPerM2)')
-    plt.title('WattsPerM2 as a Function of Wavelength')
+    plt.title('Irradiance as a Function of Wavelength')
     plt.grid(True)
     plt.savefig('irradiance_plot_' + planName + '.png')
     # plt.show()
 
-#Start
+    plt.plot(irradianceRatios, wavelengths)
+    plt.xlabel('Irradiance/Wavelength (WattsPerM2/Wavelengh (nm))')
+    plt.ylabel('Wavelength (nm)')
+    plt.title('Ratio of Irradiance per Wavelength by Wavelength')
+    plt.savefig('irradiance_ratio_' + planName + '.png')
+
+# Start
 print("Executing ...")
 
 plans = pd.read_csv('./data/plans.txt', skipinitialspace=True)
@@ -219,6 +231,6 @@ for index, row in plans.iterrows():
             formatted_row = ', '.join(map(str, result_row))
             resultsFile.write(formatted_row + '\n')
 
-print('Complete  ...')
+    print('Complete ' + row['planName'] + ' ...')
 
-plotResults('planName')
+    plotIrradianceResult(row['planName'])
