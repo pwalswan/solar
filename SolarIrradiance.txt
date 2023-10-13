@@ -1,5 +1,3 @@
-incomplete
-
 Using Visual Studio Code for development
 Created folder called solar and added a data directory with exercise data files
 Download Docker Desktop for Mac Intel, choose default complete installation (added Docker to path for terminal commands)
@@ -14,8 +12,19 @@ That created a venv in the project root with bin, lib and include
 Installed VSCode Docker extension and let it generate default Python Dockerfile
 My app entrypoint is solar.py (print("Executing"))
 
+Create a new directory in your project area in your home dir, or elsewhere
+git clone https://github.com/pwalswan/solar.git
 docker build -t solar-image .
-docker run solar-image (it runs and exits)
+At a terminal command line type
+    pwd
+
+It will be something like /Users/<username>/<abc>
+Use that as the path to the directory where the project was cloned, and replace <absolute>
+
+docker run -v <absolute>/solar:/app solar-image
+
+e.g.  mine was:
+docker run -v /Users/paulswanson/work/solar3/solar:/app solar-image
 
 I have the photon counts. Need to put that into an equation. I need to calculate the irradiance in Watts/m2/nm for UpScan and DownScan and compare results.
 I also later need to add the temperature correction using data in detectorTemp.txt

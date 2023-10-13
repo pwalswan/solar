@@ -86,6 +86,7 @@ def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg
     detectorTemps = pd.read_csv('./data/detectorTemp.txt', skipinitialspace=True)
     referenceSpectrum = pd.read_csv('./data/referenceSpectrum.txt', skipinitialspace=True)
     integrationTime = pd.read_csv('./data/integrationTime.txt', skipinitialspace=True)
+    distanceAndDoppler = pd.read_csv('./data/distanceAndDoppler.txt', skipinitialspace=True)
 
     # New list and dataframe for results
     resultsList = []
@@ -97,10 +98,11 @@ def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg
     except:
         endIndex = instrumentTelemetry.index[-1] # Get the last index if the planEndTime exceeds the last intrumentTelemetry reading
 
+    sunObserverDistanceCorrection = distanceAndDoppler['sunObserverDistanceCorrection'].iloc[0]
+
     for telemetryRowIndex in range(startIndex, endIndex):
         instrumentTelementryRow = instrumentTelemetry.iloc[telemetryRowIndex]
         gratingPosition = instrumentTelementryRow['gratPos']
-        microsecondsSinceGpsEpoch = instrumentTelementryRow['microsecondsSinceGpsEpoch']
 
         # Wavelength (the grating equation)
         offset = 239532.38
@@ -133,18 +135,24 @@ def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg
         energyPerPhoton = h * c / wavelengthInMeters # [J]
         wattsPerM2 = photonsPerSecondPerM2 * energyPerPhoton # [watts/m^2/nm]
 
-        referenceSpectrum['irradiance (watts/m^2/nm)'] = pd.to_numeric(referenceSpectrum['irradiance (watts/m^2/nm)'])
-        closestIndex = (referenceSpectrum['irradiance (watts/m^2/nm)'] - wattsPerM2).abs().idxmin()
+        # include Astronomical Unit Correction
+        wattsPerM2 = wattsPerM2 / sunObserverDistanceCorrection
+        # Need to At the Downscan start time, the grating position in instrumentTelemetry goes from 0 to non-zero: this as it changes in distanceAndDoppler.txt if there is a match for the microsecondsSinceGpsEpoch
+        # for each telemetery iteration. It generally 1.0273.
 
-        referenceSpectrumRow = referenceSpectrum.iloc[closestIndex]
-        referenceSpectrumWavelength = referenceSpectrumRow['wavelength(nm)']
+        # referenceSpectrum['irradiance (watts/m^2/nm)'] = pd.to_numeric(referenceSpectrum['irradiance (watts/m^2/nm)'])
+        # closestIndex = (referenceSpectrum['irradiance (watts/m^2/nm)'] - wattsPerM2).abs().idxmin()
+
+        # referenceSpectrumRow = referenceSpectrum.iloc[closestIndex]
+        # referenceSpectrumWavelength = referenceSpectrumRow['wavelength(nm)']
         
         resultsList.append([
             planName,
             telemetryRowIndex, 
             instrumentTelementryRow['microsecondsSinceGpsEpoch'],
             wattsPerM2,
-            referenceSpectrumWavelength
+            round(wavelength, 2)
+            # referenceSpectrumWavelength
             ]
         )
 
@@ -155,11 +163,13 @@ def processPlan(planName, planStartTime, planEndTime, median_dark_count_rate_arg
 def plotIrradianceResult(planName):
     
     print('plotIrradianceResults ...')
-    
+
+    referenceSpectrumPlotting = pd.read_csv('./data/referenceSpectrum.txt', skipinitialspace=True)
+
     planNames = []
     wavelengths = []
     wattsPerM2s = []
-    irradianceRatios = []
+    referenceSpectrumIrradianceRatios = []
 
     with open('results' + planName + '.txt') as file:
 
@@ -170,21 +180,24 @@ def plotIrradianceResult(planName):
             if float(wavelength.rstrip('\n')) > 180 and float(wavelength.rstrip('\n')) < 183:
                 wavelengths.append(float(wavelength))
                 wattsPerM2s.append(float(wattsPerM2.strip('\n')))
-                irradianceRatios.append(float(wattsPerM2.strip('\n')) / float(wavelength))
+                wl = wavelength.rstrip('\n')
+                referenceSpectrumRow = referenceSpectrumPlotting[pd.to_numeric(referenceSpectrumPlotting['wavelength(nm)']) == float(wl)]
+                referenceSpectrumIrradiance = referenceSpectrumRow['irradiance (watts/m^2/nm)']
+                referenceSpectrumIrradianceRatios.append(float(wattsPerM2.strip('\n')) / float(referenceSpectrumIrradiance))
 
     plt.figure(figsize=(12, 8))
     plt.plot(wavelengths, wattsPerM2s, marker='o', color='b', linestyle='-', linewidth=2, markersize=8)
     plt.xlabel('Wavelength (nm)')
     plt.ylabel('Irradiance (WattsPerM2)')
-    plt.title('Irradiance as a Function of Wavelength')
+    plt.title('Irradiance as a Function of Wavelength (' + planName + ')')
     plt.grid(True)
     plt.savefig('irradiance_plot_' + planName + '.png')
     # plt.show()
 
-    plt.plot(irradianceRatios, wavelengths)
-    plt.xlabel('Irradiance/Wavelength (WattsPerM2/Wavelengh (nm))')
-    plt.ylabel('Wavelength (nm)')
-    plt.title('Ratio of Irradiance per Wavelength by Wavelength')
+    plt.plot(wavelengths, referenceSpectrumIrradianceRatios)
+    plt.xlabel('Wavelength (nm)')
+    plt.ylabel('Irradiance result / reference')
+    plt.title('Ratio of Irradiance per Wavelength (' + planName + ')')
     plt.savefig('irradiance_ratio_' + planName + '.png')
 
 # Start
